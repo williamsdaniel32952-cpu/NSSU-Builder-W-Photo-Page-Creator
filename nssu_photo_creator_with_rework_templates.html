@@ -876,19 +876,86 @@
     .upload-controls{display:none!important}
     .slot-handle, .slot-drag-handle{display:none !important}
     .slot{break-inside: avoid; page-break-inside: avoid}
+
+    /* Hide the WIS / Video buttons section in print - it's a screen-only
+       capture interface, not part of the printable page. Without this,
+       the buttons render as a second page. */
+    #wisSection, #videosSection{display:none !important}
+
+    /* Compact the page header into a thin one-line banner showing the
+       autofill values inline. Strip the input borders/backgrounds so it
+       reads as plain printed text. */
+    .page-header.editable-header{
+      display: flex !important;
+      flex-wrap: wrap;
+      gap: 4px 14px !important;
+      grid-template-columns: none !important;
+      padding: 4px 8px !important;
+      margin: 0 0 6px 0 !important;
+      border: 1px solid #94a3b8 !important;
+      border-radius: 0 !important;
+      background: #fff !important;
+      font-size: 10pt !important;
+      line-height: 1.25 !important;
+    }
+    .page-header.editable-header > div{
+      display: inline-flex !important;
+      align-items: baseline;
+      gap: 4px;
+      flex-direction: row !important;
+      padding: 0 !important;
+      background: transparent !important;
+      border: 0 !important;
+    }
+    .page-header.editable-header > div span{
+      font-weight: 700;
+      color: #0f172a;
+      font-size: 9pt;
+    }
+    .page-header.editable-header > div input{
+      border: none !important;
+      background: transparent !important;
+      padding: 0 !important;
+      margin: 0 !important;
+      font-size: 10pt !important;
+      font-weight: 600;
+      color: #0f172a;
+      width: auto !important;
+      min-width: 60px;
+      max-width: 200px;
+      box-shadow: none !important;
+      outline: none !important;
+    }
+    /* Hide empty fields so the banner doesn't show "Tracking #: " followed
+       by nothing - drop the whole pair when the value is blank. */
+    .page-header.editable-header > div:has(input:placeholder-shown){
+      display: none !important;
+    }
+
     /* Scale the 1000px-wide page to fit the printable letter-landscape area.
-       Using a wrapper transform avoids breaking the layout while it's on
-       screen. The page renders at its natural size, then is scaled down to
-       100% of the printable width. */
+       We multiply by 1.0 (no extra reduction) since the WIS section is now
+       hidden and the header is compact - the photos can claim the rest. */
     .page{
       width: 1000px !important;
       min-height: 0 !important;
       box-shadow:none !important;
       border:0 !important;
-      padding: 8px !important;
+      padding: 6px !important;
       margin: 0 !important;
       transform-origin: top left;
       transform: scale(calc((11in - 0.6in) / 1000px));
+    }
+
+    /* Make the template area fill the available vertical space below the
+       compact banner. The page is scaled to printable width via transform;
+       its height in pre-transform coordinates needs to match what the
+       printable area is in those same coordinates. Letter landscape
+       printable area at scale = (11in - 0.6in) / 1000px is ~10.4in wide
+       and ~7.5in tall in print units. In page coordinates, the height
+       budget is approximately 1000px * (7.5/10.4) = ~720px. We tell the
+       template area to fill that. */
+    #templateArea.template-area{
+      min-height: 700px !important;
     }
   }
 </style>
