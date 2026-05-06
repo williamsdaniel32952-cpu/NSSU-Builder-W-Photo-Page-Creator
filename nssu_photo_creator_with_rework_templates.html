@@ -855,109 +855,6 @@
     .page{width:100%; min-width:760px}
     .canvas-shell{padding:8px}
   }
-  @media print{
-    @page{
-      size: letter landscape;
-      margin: 0.3in;
-    }
-    html, body{
-      background:#fff !important;
-      width: 100%;
-      height: 100%;
-      margin: 0 !important;
-      padding: 0 !important;
-      -webkit-print-color-adjust: exact !important;
-      print-color-adjust: exact !important;
-      color-adjust: exact !important;
-    }
-    header,.toolbar,.side-panel,.hero,.template-controls,.template-toolbar{display:none!important}
-    main{padding:0 !important;max-width:none !important;margin:0 !important;display:block !important}
-    .canvas-shell{box-shadow:none;border:0;padding:0;overflow:visible !important;background:transparent !important}
-    .upload-controls{display:none!important}
-    .slot-handle, .slot-drag-handle{display:none !important}
-    .slot{break-inside: avoid; page-break-inside: avoid}
-
-    /* Hide the WIS / Video buttons section in print - it's a screen-only
-       capture interface, not part of the printable page. Without this,
-       the buttons render as a second page. */
-    #wisSection, #videosSection{display:none !important}
-
-    /* Compact the page header into a thin one-line banner showing the
-       autofill values inline. Strip the input borders/backgrounds so it
-       reads as plain printed text. */
-    .page-header.editable-header{
-      display: flex !important;
-      flex-wrap: wrap;
-      gap: 4px 14px !important;
-      grid-template-columns: none !important;
-      padding: 4px 8px !important;
-      margin: 0 0 6px 0 !important;
-      border: 1px solid #94a3b8 !important;
-      border-radius: 0 !important;
-      background: #fff !important;
-      font-size: 10pt !important;
-      line-height: 1.25 !important;
-    }
-    .page-header.editable-header > div{
-      display: inline-flex !important;
-      align-items: baseline;
-      gap: 4px;
-      flex-direction: row !important;
-      padding: 0 !important;
-      background: transparent !important;
-      border: 0 !important;
-    }
-    .page-header.editable-header > div span{
-      font-weight: 700;
-      color: #0f172a;
-      font-size: 9pt;
-    }
-    .page-header.editable-header > div input{
-      border: none !important;
-      background: transparent !important;
-      padding: 0 !important;
-      margin: 0 !important;
-      font-size: 10pt !important;
-      font-weight: 600;
-      color: #0f172a;
-      width: auto !important;
-      min-width: 60px;
-      max-width: 200px;
-      box-shadow: none !important;
-      outline: none !important;
-    }
-    /* Hide empty fields so the banner doesn't show "Tracking #: " followed
-       by nothing - drop the whole pair when the value is blank. */
-    .page-header.editable-header > div:has(input:placeholder-shown){
-      display: none !important;
-    }
-
-    /* Scale the 1000px-wide page to fit the printable letter-landscape area.
-       We multiply by 1.0 (no extra reduction) since the WIS section is now
-       hidden and the header is compact - the photos can claim the rest. */
-    .page{
-      width: 1000px !important;
-      min-height: 0 !important;
-      box-shadow:none !important;
-      border:0 !important;
-      padding: 6px !important;
-      margin: 0 !important;
-      transform-origin: top left;
-      transform: scale(calc((11in - 0.6in) / 1000px));
-    }
-
-    /* Make the template area fill the available vertical space below the
-       compact banner. The page is scaled to printable width via transform;
-       its height in pre-transform coordinates needs to match what the
-       printable area is in those same coordinates. Letter landscape
-       printable area at scale = (11in - 0.6in) / 1000px is ~10.4in wide
-       and ~7.5in tall in print units. In page coordinates, the height
-       budget is approximately 1000px * (7.5/10.4) = ~720px. We tell the
-       template area to fill that. */
-    #templateArea.template-area{
-      min-height: 700px !important;
-    }
-  }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
@@ -969,7 +866,7 @@
   <div class="brand"><div class="brand-mark">TRIGO</div></div>
   <div class="header-actions">
     <button class="secondary" onclick="showHome()">Templates</button>
-    <button onclick="saveDraft()">Save Draft</button><button class="light" onclick="window.print()">Print / Save PDF</button>
+    <button onclick="saveDraft()">Save Draft</button>
   </div>
 </header>
 
@@ -1019,7 +916,6 @@
       <button class="secondary" onclick="showHome()">← Back to Templates</button>
       <button onclick="clearAllPhotos()">Clear Photos</button>
       <button class="light" onclick="exportAllJpegs()">Export JPEGs</button>
-      <button class="light" onclick="window.print()" title="Browser print">Print</button>
       <div class="field"><label>Current Template</label><input id="currentTemplateName" readonly></div>
     </div>
 
@@ -1483,13 +1379,33 @@ async function exportPhotoPageJpeg(){
   }
   const page = document.getElementById('page');
   if (!page) return;
-  // Render at higher pixel density for clarity, then downscale on output.
+
+  // html2canvas was clipping a few pixels off the right edge - the inner
+  // content (captions, slot borders) extends to the page's content edge
+  // and sub-pixel rounding plus html2canvas's foreignObject fallback
+  // sometimes shaves the last column. We work around it by:
+  //   1. Measuring the actual page rect (including any sub-pixel size)
+  //   2. Adding a small right-side guard (8px) to the capture width
+  //   3. Passing windowWidth large enough that nothing is constrained
+  //   4. Filling the guard area with white so it's invisible in the JPEG
+  const rect = page.getBoundingClientRect();
+  const captureWidth = Math.ceil(rect.width) + 8;
+  const captureHeight = Math.ceil(rect.height);
+
   const canvas = await html2canvas(page, {
     backgroundColor: '#ffffff',
     scale: 2,
     useCORS: true,
-    logging: false
+    logging: false,
+    width: captureWidth,
+    height: captureHeight,
+    windowWidth: Math.max(document.documentElement.clientWidth, captureWidth + 100),
+    scrollX: 0,
+    scrollY: -window.scrollY,
+    x: 0,
+    y: 0
   });
+
   // Downscale rendered canvas to landscape long-edge target
   const target = PHOTO_PAGE_LONG_EDGE;
   const w = canvas.width, h = canvas.height;
