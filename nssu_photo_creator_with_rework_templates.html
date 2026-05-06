@@ -294,10 +294,45 @@
     display:grid;
     gap:8px;
     min-height:600px;
-    /* Cells stretch to fill their grid cell by default (CSS Grid default).
-       The resize handler sets `align-self: start` on individually-resized
-       slots so they don't drag their row's siblings when their explicit
-       height grows past the row track. */
+    /* Default mode (used by thumbnails on the home screen): single CSS
+       grid with whatever cols/rows the template specifies. Cells stretch
+       to fill their grid cell by default. */
+  }
+  /* Rows-mode: openTemplate sets this class to switch the live editor
+     into a vertical stack of independent flex rows. Each row is its own
+     flex container so:
+       - resizing a slot wider in row 2 doesn't widen the same column in
+         row 1 (rows don't share column tracks)
+       - growing one slot horizontally compacts siblings in the same row
+         (flex naturally redistributes width)
+       - slots can never escape the page bounds (rows have a hard
+         max-width of 100% of the template area)
+     The per-row height is independent because each row is a block box.
+     Resizing a slot's height in row 2 only changes that row's height. */
+  .template-area.rows-mode{
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+    min-height:600px;
+  }
+  .template-row{
+    display:flex;
+    flex-direction:row;
+    gap:8px;
+    width:100%;
+    min-width:0;
+    max-width:100%;
+    /* min-height ensures the row has presence even when slots are empty;
+       the slots themselves stretch to fill the row vertically. */
+    min-height:220px;
+    align-items:stretch;
+  }
+  /* Slots inside a row default to equal share. The resize handler
+     overrides flex when the user explicitly resizes a slot. */
+  .template-row > .slot{
+    flex:1 1 0;
+    min-width:120px;
+    min-height:0;
   }
   .side-panel{
     background:#fff;
@@ -582,10 +617,33 @@
   .caption.gray{background:#e5e7eb}
   .caption.reworkBlue{background:linear-gradient(#60a5fa,#3b82f6);box-shadow:inset 0 -8px #1d4ed8}
   .caption.witnessMark{background:#000;color:#fff}
-  .witness-content{
+  .witness-center{
+    /* Non-editable centerer. Keeps the editable content visually
+       centered no matter what the user types/deletes. */
     display:flex;align-items:center;justify-content:center;
-    height:100%;min-height:240px;text-align:center;font-weight:900;line-height:1.7;
-    padding:12px;font-size:16px;
+    height:100%;min-height:240px;
+    padding:12px;
+    box-sizing:border-box;
+  }
+  .witness-content{
+    /* Editable block. No flex here - just a centered text block. This
+       way, when the browser inserts <div>s or <br>s on Enter, they
+       stack vertically as expected and the outer centerer still
+       positions the whole block in the middle of the slot. */
+    display:block;
+    text-align:center;
+    font-weight:900;
+    line-height:1.7;
+    font-size:16px;
+    width:100%;
+    outline:none;
+    /* Soft visual cue when focused - makes the editable region obvious
+       without being intrusive. */
+  }
+  .witness-content:focus{
+    outline:1.5px dashed #94a3b8;
+    outline-offset:4px;
+    border-radius:4px;
   }
   .annotation-layer{
     position:absolute;inset:0;pointer-events:none;z-index:4;
@@ -1120,19 +1178,21 @@ function openTemplate(id){
   document.getElementById('editorScreen').classList.add('active');
   document.getElementById('currentTemplateName').value = t.name;
   const area = document.getElementById('templateArea');
-  area.style.gridTemplateColumns=t.cols;
-  // Replace explicit '1fr'-style row tracks with `minmax(220px, 1fr)`.
-  // The 1fr distributes available canvas height across rows so the
-  // initial layout fills the canvas. The 220px floor keeps rows from
-  // collapsing when content is tiny. When the user resizes one slot
-  // larger via the resize handle, that slot gets `align-self: start`
-  // (set by the resize handler) so its growth doesn't drag siblings
-  // in the same row, while the row track itself can grow to fit.
-  const rowParts = String(t.rows || '').trim().split(/\s+/).filter(Boolean);
-  area.style.gridTemplateRows = rowParts.length
-    ? rowParts.map(() => 'minmax(220px, 1fr)').join(' ')
-    : t.rows;
-  area.innerHTML='';
+  area.innerHTML = '';
+
+  // Reset any inline grid styles from earlier templates - we now use a
+  // vertical stack of horizontal flex rows instead of a CSS grid. Each
+  // row is its own independent flex container.
+  area.style.gridTemplateColumns = '';
+  area.style.gridTemplateRows = '';
+  area.classList.add('rows-mode');
+
+  // Determine how many slots per row based on the template's `cols` string.
+  // Cols like '1fr 1fr 1fr' = 3 columns/slots-per-row. We support any
+  // value: explicit fr-tracks, percentages, or a mix.
+  const colsParts = String(t.cols || '').trim().split(/\s+/).filter(Boolean);
+  const slotsPerRow = colsParts.length || 2;
+
   // Resolve which caption to display for each slot in this template.
   // Inspection templates pull from the NSSU handoff (if present);
   // rework templates always use the short hardcoded labels.
@@ -1143,7 +1203,22 @@ function openTemplate(id){
     }
     return labels[slotKind].caption;
   };
-  t.slots.forEach((s,i)=>area.appendChild(makeSlot(s, i+1, captionFor(s))));
+
+  // Chunk slots into rows. Each row becomes a flex container so its
+  // children share the row's width: when one slot grows, siblings
+  // compact. Resizing a slot in row 2 doesn't touch row 1 because
+  // rows are independent block boxes.
+  let row = null;
+  t.slots.forEach((s, i) => {
+    if (i % slotsPerRow === 0) {
+      row = document.createElement('div');
+      row.className = 'template-row';
+      row.dataset.rowIndex = String(Math.floor(i / slotsPerRow));
+      area.appendChild(row);
+    }
+    row.appendChild(makeSlot(s, i + 1, captionFor(s)));
+  });
+
   renderWisSection(t);
   syncHeader();
 }
@@ -1587,8 +1662,9 @@ function makeSlot(kind,index,captionOverride){
   slot.dataset.slotKind = kind;
   slot.onclick=(e)=>{ if(e.target.tagName!=='BUTTON' && e.target.tagName!=='INPUT') selectSlot(slot); };
   if(L.witness){
-    slot.innerHTML = `<div class="slot-drag-handle" title="Drag to reorder"><span></span></div><div class="witness-content" contenteditable="true">Witness Mark Location:<br><br>1st. = Blue<br>2nd. = Yellow</div>`;
+    slot.innerHTML = `<div class="slot-drag-handle" title="Drag to reorder"><span></span></div><div class="witness-center"><div class="witness-content" contenteditable="true" data-witness-default="Witness Mark Location:<br><br>1st. = Blue<br>2nd. = Yellow">Witness Mark Location:<br><br>1st. = Blue<br>2nd. = Yellow</div></div>`;
     enableSlotReorderDrag(slot);
+    enableWitnessEditor(slot.querySelector('.witness-content'));
     return slot;
   }
   const inputId = `photo_${Date.now()}_${index}`;
@@ -1610,6 +1686,89 @@ function makeSlot(kind,index,captionOverride){
   makeSlotExcelResize(slot);
   enableSlotReorderDrag(slot);
   return slot;
+}
+
+// Enable an editable witness panel: stable Enter handling (always
+// inserts a <br>, never a <div>) and auto-restore of the default text
+// when the user empties the field. Without this, browsers' default
+// contenteditable Enter behavior produces inconsistent DOM (Chrome
+// inserts <div>, Firefox inserts <br>, sometimes wrapping changes
+// alignment and can't be undone), and clearing all text leaves stray
+// empty wrapper elements that break further keyboard input.
+function enableWitnessEditor(el){
+  if (!el) return;
+  const restoreDefault = () => {
+    const def = el.dataset.witnessDefault || '';
+    el.innerHTML = def;
+  };
+  // If the element is mostly empty (only whitespace and <br>s), treat
+  // as empty for restore purposes.
+  const isEffectivelyEmpty = () => {
+    const text = (el.textContent || '').replace(/\s+/g, '').trim();
+    return text.length === 0;
+  };
+
+  // Intercept Enter to always insert a plain <br> at the caret. This
+  // gives consistent behavior across Chrome, Firefox, Safari, and
+  // mobile browsers - no surprise <div> wrapping, no inherited
+  // alignment changes.
+  el.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const sel = window.getSelection && window.getSelection();
+      if (!sel || sel.rangeCount === 0) return;
+      const range = sel.getRangeAt(0);
+      range.deleteContents();
+      const br = document.createElement('br');
+      range.insertNode(br);
+      // Move caret after the <br>. If the <br> is the very last node,
+      // also insert a zero-width space so the caret has somewhere to
+      // sit and a subsequent Enter actually moves down a line.
+      const after = document.createRange();
+      after.setStartAfter(br);
+      after.collapse(true);
+      if (!br.nextSibling) {
+        const tn = document.createTextNode('\u200B'); // zero-width space
+        br.parentNode.insertBefore(tn, br.nextSibling);
+        after.setStartAfter(tn);
+        after.collapse(true);
+      }
+      sel.removeAllRanges();
+      sel.addRange(after);
+    }
+  });
+
+  // After any input, if the user has cleared everything, restore the
+  // default template so the field is never left in an unrecoverable
+  // empty state.
+  el.addEventListener('input', () => {
+    if (isEffectivelyEmpty()) {
+      restoreDefault();
+      const sel = window.getSelection && window.getSelection();
+      if (sel) {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        range.collapse(false);
+        sel.removeAllRanges();
+        sel.addRange(range);
+      }
+    }
+  });
+
+  // On blur, strip zero-width spaces and trailing empty wrappers so
+  // the field is in a clean state for next click and stays tidy in
+  // JSON drafts.
+  el.addEventListener('blur', () => {
+    el.innerHTML = el.innerHTML.replace(/\u200B/g, '');
+    while (el.lastChild) {
+      const last = el.lastChild;
+      const isEmptyDiv = last.nodeType === 1 && last.tagName === 'DIV' && !last.textContent.trim() && !last.querySelector('img');
+      if (isEmptyDiv) { el.removeChild(last); } else { break; }
+    }
+    if (isEffectivelyEmpty()) {
+      restoreDefault();
+    }
+  });
 }
 
 // Enables insert-on-drag reordering for a slot. The drag handle (top-left
@@ -1781,7 +1940,9 @@ function makeSlotExcelResize(slot){
 
     const dx=e.clientX-startX;
     const dy=e.clientY-startY;
-    const parent=slot.parentElement.getBoundingClientRect();
+    const parentEl = slot.parentElement;
+    const parent = parentEl.getBoundingClientRect();
+    const isFlexRow = parentEl && parentEl.classList.contains('template-row');
     const minW=120;
     const minH=110;
 
@@ -1795,19 +1956,41 @@ function makeSlotExcelResize(slot){
     w=Math.max(minW,w);
     h=Math.max(minH,h);
 
+    // Hard-bound the slot to its parent. The resize handler enforces
+    // that the slot can never escape the visible row width or height.
     if(left<0){ w+=left; left=0; }
     if(top<0){ h+=top; top=0; }
-    if(left+w>parent.width) w=parent.width-left;
+
+    if (isFlexRow) {
+      // In flex-row mode the slot's width is controlled by flex-basis
+      // (set below). To prevent the slot from monopolizing the row, cap
+      // its width to (row width - sum of sibling minimums - gaps).
+      const siblings = Array.from(parentEl.children).filter(c => c !== slot && c.classList.contains('slot'));
+      const gap = 8;
+      const reservedForSiblings = siblings.length * (minW + gap);
+      const maxWForRow = Math.max(minW, parent.width - reservedForSiblings);
+      w = Math.min(w, maxWForRow);
+
+      slot.style.flex = '0 0 ' + w + 'px';
+      slot.style.width = '';  // let flex-basis drive width
+    } else {
+      // Legacy grid mode (used by home screen thumbnails - shouldn't
+      // hit this in the editor, but keep the path safe).
+      if(left+w>parent.width) w=parent.width-left;
+      slot.style.width = w + 'px';
+    }
+
     if(top+h>parent.height) h=parent.height-top;
+    slot.style.height = h + 'px';
+    slot.style.minHeight = '0';
 
-    slot.style.width=w+'px';
-    slot.style.height=h+'px';
-    slot.style.minHeight='0';
-    slot.style.alignSelf='start';
-
-    // CSS grid normally controls position. When resizing from north/west, preserve visual placement using margins.
-    slot.style.marginLeft=Math.max(0,left-startLeft)+'px';
-    slot.style.marginTop=Math.max(0,top-startTop)+'px';
+    // Margins for north/west drag are not relevant in flex-row mode -
+    // flex children are positioned by the layout, not by margins from
+    // a fixed origin. Skip margin-shift in flex mode.
+    if (!isFlexRow) {
+      slot.style.marginLeft=Math.max(0,left-startLeft)+'px';
+      slot.style.marginTop=Math.max(0,top-startTop)+'px';
+    }
 
     lockPhotoToBorder(slot);
   });
