@@ -1380,31 +1380,92 @@ async function exportPhotoPageJpeg(){
   const page = document.getElementById('page');
   if (!page) return;
 
-  // html2canvas was clipping a few pixels off the right edge - the inner
-  // content (captions, slot borders) extends to the page's content edge
-  // and sub-pixel rounding plus html2canvas's foreignObject fallback
-  // sometimes shaves the last column. We work around it by:
-  //   1. Measuring the actual page rect (including any sub-pixel size)
-  //   2. Adding a small right-side guard (8px) to the capture width
-  //   3. Passing windowWidth large enough that nothing is constrained
-  //   4. Filling the guard area with white so it's invisible in the JPEG
-  const rect = page.getBoundingClientRect();
-  const captureWidth = Math.ceil(rect.width) + 8;
-  const captureHeight = Math.ceil(rect.height);
+  // Cross-device consistency: capture the page at a fixed 1000px width
+  // regardless of whether the user is on a PC at 1920 or a tablet at 1024.
+  //
+  // The previous approach used the live page element + html2canvas's
+  // windowWidth option. That caused two distinct bugs:
+  //  - PC: passing windowWidth larger than the live viewport caused
+  //    html2canvas to reflow the page's text inputs at a slightly
+  //    different metric, making the second row of header fields taller
+  //    than the captureHeight we'd computed from rect.height. Bottoms
+  //    of inputs were clipped.
+  //  - Tablet: live page rendered at ~760px (screen min-width), but we
+  //    told html2canvas to use a 1108px window. Internal content
+  //    reflowed to 1000px wide, but our capture rect was still
+  //    measuring the 760px live page. Right ~240px got clipped.
+  //
+  // Fix: clone the page into an offscreen container at exactly 1000px
+  // wide (the page's natural design width), let it lay out fully, then
+  // capture THAT clone. Same width on every device.
+  const TARGET_WIDTH = 1000;
 
-  const canvas = await html2canvas(page, {
-    backgroundColor: '#ffffff',
-    scale: 2,
-    useCORS: true,
-    logging: false,
-    width: captureWidth,
-    height: captureHeight,
-    windowWidth: Math.max(document.documentElement.clientWidth, captureWidth + 100),
-    scrollX: 0,
-    scrollY: -window.scrollY,
-    x: 0,
-    y: 0
+  const clone = page.cloneNode(true);
+  // Strip any inline width/height the clone inherited from interactive
+  // resize state - we want a clean fresh layout.
+  clone.style.width = TARGET_WIDTH + 'px';
+  clone.style.minWidth = TARGET_WIDTH + 'px';
+  clone.style.maxWidth = TARGET_WIDTH + 'px';
+  clone.style.boxShadow = 'none';
+  clone.style.margin = '0';
+  // Remove drag/resize handles from the clone so they don't render
+  clone.querySelectorAll('.slot-handle, .slot-drag-handle').forEach(el => el.remove());
+
+  // Mirror the live page's slot inline styles (resize state) onto the
+  // clone's matching slots, by iterating in DOM order. We can't query
+  // by ID because slot IDs aren't stable. Order is reliable because the
+  // clone preserves DOM order.
+  const liveSlots = page.querySelectorAll('.slot');
+  const cloneSlots = clone.querySelectorAll('.slot');
+  liveSlots.forEach((live, i) => {
+    if (!cloneSlots[i]) return;
+    const cs = cloneSlots[i];
+    if (live.style.width) cs.style.width = live.style.width;
+    if (live.style.height) cs.style.height = live.style.height;
+    if (live.style.gridColumn) cs.style.gridColumn = live.style.gridColumn;
+    if (live.style.gridRow) cs.style.gridRow = live.style.gridRow;
   });
+
+  // Stage the clone offscreen but at full visibility so html2canvas can
+  // measure layout. Position fixed at top-left, off-screen via
+  // transform translate so it doesn't affect document scroll/layout.
+  const stage = document.createElement('div');
+  stage.style.position = 'fixed';
+  stage.style.top = '0';
+  stage.style.left = '0';
+  stage.style.width = TARGET_WIDTH + 'px';
+  stage.style.background = '#ffffff';
+  stage.style.zIndex = '-9999';
+  stage.style.pointerEvents = 'none';
+  stage.style.transform = 'translateX(-200vw)'; // visually offscreen
+  stage.appendChild(clone);
+  document.body.appendChild(stage);
+
+  // Wait one paint frame so layout settles
+  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+  let canvas;
+  try {
+    canvas = await html2canvas(clone, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      useCORS: true,
+      logging: false,
+      // Use the clone's own measured size so we capture exactly what
+      // it laid out at - no windowWidth shenanigans.
+      width: TARGET_WIDTH,
+      height: Math.ceil(clone.getBoundingClientRect().height),
+      windowWidth: TARGET_WIDTH,
+      windowHeight: Math.ceil(clone.getBoundingClientRect().height) + 50,
+      x: 0,
+      y: 0,
+      scrollX: 0,
+      scrollY: 0
+    });
+  } finally {
+    // Always clean up the stage even if rendering threw
+    document.body.removeChild(stage);
+  }
 
   // Downscale rendered canvas to landscape long-edge target
   const target = PHOTO_PAGE_LONG_EDGE;
