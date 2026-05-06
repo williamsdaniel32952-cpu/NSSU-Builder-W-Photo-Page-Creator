@@ -16,106 +16,119 @@ Complete GitHub Pages deployment for the NSSU Input Portal and the Additional Ph
 
 ## Deploying to GitHub Pages
 
-1. Replace **all files** in your repo's root with the files in this package.
-2. Commit and push to your default branch (the one Pages serves from).
+1. Replace **all files** in your repo's root with the files in this package (including the hidden `.nojekyll`).
+2. Commit and push to your default branch.
 3. GitHub Pages should redeploy in ~30 seconds.
-4. Open the site in an **incognito / private window** and hard-refresh (Ctrl+Shift+R / Cmd+Shift+R) to bypass any browser cache. Aggressive caching is the most common reason changes don't appear right away.
+4. Open the site in an **incognito / private window** and hard-refresh (Ctrl+Shift+R / Cmd+Shift+R) to bypass any browser cache.
 
 ## Verifying a successful deployment
 
-After hard-refresh, you should see:
+After hard-refresh:
 
-- **Top-left of the masthead:** a "Photo Creator" button (dark gray)
-- **Top-right of the masthead:** a "Home" button + hamburger menu + the NSSU logo
-- **Right column** (scrolling down): Page 3 Work Instructions Preview, then Page 4 Rework Steps Preview (when rework is selected), then a Save as Draft button, then **Page 2 — Safety Section** below all of that
-- **Left column** (Page 1 form): ends at "DTL / Back and Forth Frequency" — no "Page 1 Required Statements" row, no AI suggestion note under Save as Draft
-
-If after pushing you still see the old version, view page source (right-click → "View Page Source") and search for `toPhotoCreatorBtn`. If the string is in the source, the file is deployed correctly and any visual regression is a browser-cache issue. If it's not in the source, the file isn't deployed.
+- **NSSU form top-left:** "Photo Creator" button (dark gray)
+- **NSSU form top-right:** "Home" + hamburger + NSSU logo
+- **NSSU form right column** (scrolling down): Page 3 preview → Page 4 (when rework selected) → Save as Draft → Page 2 Safety Section
+- **NSSU form left column:** ends at "DTL / Back and Forth Frequency" — no Page 1 Required Statements row
+- **Photo Creator toolbar:** "← Back to Templates", "Clear Photos", "Export JPEGs", and "Current Template" (no Print button)
+- **Photo Creator masthead:** "Templates" + "Save Draft" (no Print/Save PDF button)
+- **WIS Photos section** below the photo grid: still-camera icons for the photo types, plus two distinctly colored video buttons at the end (green Inspection Video, blue Rework Video)
 
 ---
 
-## Feature inventory — full session changes layered
+## Latest changes (since the May 5 baseline)
+
+This package contains everything from the May 5 session plus the May 6 changes:
+
+### May 6 — Print path eliminated
+- Removed the "Print / Save PDF" button from the photo creator masthead
+- Removed the secondary "Print" button from the template toolbar
+- Stripped 115 lines of `@media print` CSS — no print path remains
+- Sole export route is **Export JPEGs**
+
+### May 6 — JPEG export right-edge clipping fix
+- html2canvas was sub-pixel rounding the right edge during capture, shaving the rightmost pixel column off slot borders, caption bars, and banner inputs
+- Fixed by:
+  - Adding 8px right-side white guard to the capture width
+  - Explicit `windowWidth`, `width`, `height`, `x`, `y`, `scrollX` parameters passed to `html2canvas`
+  - Forces a clean full-width capture instead of a `boundingClientRect`-inferred capture
+
+---
+
+## Full feature inventory
 
 ### NSSU Input Form (`index.html`)
 
 **Layout & form structure**
-- Page 2 Safety Section moved into the right column under the Rework Steps Preview to fill dead vertical space (PDF output unchanged — page builder reads safety rows from the new mount via `safetyMount` div)
-- Page 1 Required Statements section removed (the three yellow notice rows about emailing the copy, green ink pen, and SRP/TM trained on defect)
-- Misleading AI suggestion note removed from under Save as Draft (was implying drafts only available for Rework)
-- Tablet/narrow-viewport CSS for checkboxes: below 900px, checkboxes stack vertically (boxmark on top, label below) so labels don't word-wrap one letter per line
-- Defensive CSS on the masthead-left actions (`min-width: 140px`, `flex: 0 0 auto`) so the Photo Creator button can't collapse under any layout condition
+- Page 2 Safety Section moved into the right column under the Rework Steps Preview to fill dead vertical space (PDF output unchanged)
+- Page 1 Required Statements section removed
+- Misleading AI suggestion note removed from under Save as Draft
+- Tablet/narrow-viewport CSS for checkboxes: below 900px, checkboxes stack vertically so labels don't word-wrap one letter per line
+- Defensive masthead-left CSS (`min-width: 140px`, `flex: 0 0 auto`) so the Photo Creator button can't collapse
 
 **Signatures**
-- Signature canvases 20% taller (48 → 58px canvas height, 72 → 86px sign-box min-height) for easier use on touch devices
-- Revision flow: clears only the bottom 3 NSSU Approval signatures (SRP, RI/TM, RI/GL); keeps the top 2 trained-on initials so they survive a revision. New `clearApprovalSignatures()` function with synchronous flag reaffirmation to avoid the async image-onload race condition
+- Signature canvases 20% taller for easier touch use
+- Revision flow: clears only the bottom 3 NSSU Approval signatures; keeps the top 2 trained-on initials so they survive a revision
+- Synchronous `signatureStates` flag reaffirmation avoids the async image-onload race condition
 
-**Library & defects**
-- Library bug fix: blank Excel cells in the loaded library now correctly override the embedded `exactReworkAssociations` table (removed `STANDARD_FALLBACK_ENABLED`, `builtInBaseBehavior`, `buildStandardFallbackRule`, and `result.standardFallback` so the library is the sole source of truth when loaded)
+**Library**
+- Bug fix: blank Excel cells correctly override the embedded `exactReworkAssociations` table
 
 **Photo Creator handoff**
-- "Photo Creator" button in the masthead writes a localStorage handoff (`nssuPhotoHandoff`) with the top-section field values, Kanban entry, and the first sentences of inspection step 3, step 4, and rework step 1 (with leading step numbers/parens/punctuation stripped)
-- Auto-saves the current NSSU as a draft (or preserves "initiated" status) when navigating to Photo Creator, then auto-restores it on return via `nssuReturnRecordId` localStorage flag (one-shot — flag deleted after restore so a normal page refresh shows a blank form)
+- Photo Creator button writes a localStorage handoff with top-section field values, kanban entry, and first sentences of inspection step 3, step 4, and rework step 1
+- Auto-saves the current NSSU as a draft; auto-restores it on return via a one-shot `nssuReturnRecordId` flag
 
 ### Photo Page Creator (`nssu_photo_creator_with_rework_templates.html`)
 
-**NSSU handoff reception**
-- Reads `nssuPhotoHandoff` on load, populates top-section inputs, and stores caption text in a `handoffCaptions` object (one-shot — handoff key cleared after read)
-- "Back to NSSU" button correctly navigates to `index.html`
+**Handoff & captions**
+- Reads `nssuPhotoHandoff` on load, populates top-section inputs, stores caption text in a separate `handoffCaptions` object (no global state mutation)
+- Category-aware caption autofill: inspection templates use NSSU step text for `good` and `ng` slots; rework templates use short hardcoded labels
+- Comma-split caption rendering: `"If no Splits are present, Part = Good"` renders as two centered lines
+- "Back to NSSU" navigates to `index.html`
 
-**Captions**
-- Category-aware caption autofill: inspection templates pull autofilled captions from NSSU steps; rework templates always use the short hardcoded labels
-- Comma-split rendering: when an autofilled caption contains a comma, splits at the first comma into two centered lines (e.g., `"If no Splits are present,"` / `"Part = Good"`)
-- Doesn't mutate the global `labels` defaults — autofill is per-render, no leakage between template selections
-
-**Witness Mark**
-- New `witnessMark` slot type with blue 5px photo border and **black caption bar with white text** (separate from `reference` so existing reference templates aren't affected)
-- Three witness templates updated to use `witnessMark` instead of `reference` for the photo slot paired with the witness panel
-- Witness panel content made editable with text "Witness Mark Location: / 1st. = Blue / 2nd. = Yellow"
-- Witness panel edits persist to JSON drafts (write-only for now)
+**Witness Mark slot type**
+- Blue 5px photo border + black caption with white text (separate from `reference` so reference templates aren't affected)
+- Three witness templates updated to use `witnessMark`
+- Witness panel content editable, text "Witness Mark Location: / 1st. = Blue / 2nd. = Yellow"
 
 **Slot interaction**
-- Insert-on-drag reordering: drag handle in top-left of each slot, drop on another slot to insert before/after, or drop into empty grid cell to append to end of DOM order (CSS Grid auto-flow places it in the next empty cell)
-- Independent row resizing: rows use `minmax(220px, 1fr)` so the initial layout fills the canvas, but resizing one slot only grows that slot's row track (siblings keep their natural height via `align-self: start` set by the resize handler)
+- Drag handle on each slot for insert-on-drag reordering (drop on another slot = insert before/after; drop on empty grid cell = append to end of DOM order)
+- Independent row resizing: `minmax(220px, 1fr)` row tracks combined with `align-self: start` on individually-resized slots
 
 **WIS Photos section**
-- 12 buttons appear below the template area (Work Area, Whole Part, Good Photo, NG Photo, Witness Mark Photo, Suspect Area, Kanban, Rejection Step, Unpacking, Repacking, Rework Step, Rework Tools)
-- Photo-type buttons whose role is already in the current template's slots are hidden (e.g., "Good Photo" hidden when template has a `good` slot)
-- Each WIS photo button uses an SVG still-camera icon, signaling camera-only intent (`capture="environment"` opens the back camera directly on Android Chrome)
-- Once a photo is taken, button turns green with a checkmark and shows the thumbnail; small red X clears it
+- 12 photo-type buttons (Work Area, Whole Part, Good, NG, Witness Mark, Suspect Area, Kanban, Rejection Step, Unpacking, Repacking, Rework Step, Rework Tools)
+- Photo-type buttons whose role is already in the current template's slots are auto-hidden
+- Each WIS button uses an SVG still-camera icon, opens device's back camera via `capture="environment"`
 
 **Inspection / Rework videos**
-- Two extra buttons appended to the WIS Photos grid: **Inspection Video** (green-bordered, green film-camera icon) and **Rework Video** (blue-bordered, blue film-camera icon)
-- Visually distinct from photo buttons (colored borders, colored icons, colored text)
-- Use the device's built-in camera app via `<input type="file" accept="video/*" capture="environment">`
-- Recorded video metadata + blob stored in memory; included in Export JPEGs as separate files
+- Two distinctly colored buttons at the end of the WIS grid: green Inspection Video, blue Rework Video
+- Use device's built-in camera app via `<input type="file" accept="video/*" capture="environment">`
+- Recorded files included in Export JPEGs as separate downloads
 
 **Export**
-- "Export JPEGs" button produces a single JPEG of the photo page (landscape, ~1600px long edge, named `Additional Photo Page - <kanban> - <sortLocation>.jpeg`) plus individual JPEGs for each filled template slot photo (named by slot type) and each WIS photo (named by type label)
-- Videos export with their original mime/extension as `Inspection Video - <kanban> - <sortLocation>.mp4` (or `.webm`/`.mov`) and similarly for Rework Video
+- "Export JPEGs" produces:
+  - Single landscape JPEG of the whole photo page (banner + photo grid) at ~1600px long edge, named `Additional Photo Page - <kanban> - <sortLocation>.jpeg`
+  - Each filled template slot photo as its own JPEG at ~1280px long edge, named by slot type
+  - Each WIS photo as its own JPEG, named by WIS type label
+  - Each recorded video as its own file (mp4/webm/mov) with proper naming
 - All separate downloads, no zip
-- JPEG quality 0.82, target ~200–500 KB per image — comfortable for email
-- Photo page rendered via html2canvas (loaded from Cloudflare CDN — first export needs network, ~30 KB library)
-
-**Print**
-- Fit-to-page print CSS: landscape US Letter, 0.3" margins, transform-scale to fit the printable area
-- All colored borders/captions preserved (`-webkit-print-color-adjust: exact`)
-- Drag handles, resize handles, upload controls hidden in print
-- Slots use `break-inside: avoid` so they don't split across pages
+- JPEG quality 0.82, target 200–500 KB per image — comfortable for email
+- Photo page rendered via html2canvas (loaded from Cloudflare CDN)
 
 ---
 
 ## Honest caveats
 
-- **WIS photos and slot positions don't currently persist to JSON drafts** — they live in memory for the current session only. Refresh the photo creator and uploads are gone.
-- **html2canvas is a CDN dependency** — without network connectivity the page-as-JPEG export won't work, but individual photo and video exports still will (they don't need html2canvas).
-- **`capture="environment"` is a hint** — on Android Chrome and iOS Safari it opens the back camera directly. Some devices/browsers still show a chooser. On desktop, the file picker always opens. The visual cues (camera icons, tooltips) communicate intent; true enforcement requires the eventual APK wrapper to use Android's `MediaStore.ACTION_IMAGE_CAPTURE` intent.
-- **Video file size depends on the device** — the user's tablet camera produces the file. On most Android tablets you'll get MP4 H.264 at the device's default quality. Long high-resolution clips can exceed Outlook's 20 MB attachment cap. Until APK wrap, the user should keep recordings short.
-- **No TTS narration in this build** — was attempted but pulled because it required either a 25 MB ffmpeg.wasm library to merge audio onto silent video, or relying on the device speaker (won't work on a noisy factory floor). The right place for proper narrated video is the APK wrap, which can use Android's native `TextToSpeech.synthesizeToFile()` + `MediaMuxer` for clean audio in any environment.
+- **WIS photos, video recordings, and slot positions don't persist to JSON drafts** — they live in memory for the current session only
+- **html2canvas is a CDN dependency** — without network the page-as-JPEG export fails; individual photo and video exports still work
+- **Camera-only enforcement is best-effort** — `capture="environment"` opens the back camera on Android Chrome and iOS Safari but desktop browsers always show a file picker
+- **Video file size depends on the device camera** — long high-res clips can exceed Outlook's 20 MB attachment cap; users should keep recordings short
+- **No TTS narration** — was attempted but pulled because the factory floor is too loud for speaker-to-mic capture; belongs in the eventual APK build
+- **Slot resize is parent-bounded but not page-bounded** — a slot resized to fill its grid container still hits the page content edge; if a future change makes the template area larger than the page, slots could push past the page edge. Currently they don't.
 
 ## Cache-busting
 
-If you push but still see the old version:
+If after pushing you still see the old version:
 
 1. Open the site in a fresh incognito/private window
 2. Hard-refresh with Ctrl+Shift+R (Windows) or Cmd+Shift+R (Mac)
-3. If still stale, view page source and search for `toPhotoCreatorBtn` and `video-btn`. Both should be present. If they are, the file is deployed correctly and only the cache is stale.
+3. View page source and search for `Export JPEGs` and `video-btn`. Both should be present. If they are, the file is deployed correctly and only the cache is stale.
